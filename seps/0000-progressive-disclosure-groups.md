@@ -151,16 +151,14 @@ This extension follows the standard [extension negotiation][ext-overview]
 mechanism. It is disabled by default and requires explicit opt-in on both sides.
 
 A server that supports the extension advertises it in the `extensions` field of
-its capabilities. The settings object MAY carry a `listChanged` flag indicating
-support for the list-changed notification; an empty object indicates no optional
-settings:
+its capabilities.
 
 ```json
 {
   "capabilities": {
     "tools": {},
     "extensions": {
-      "io.modelcontextprotocol/groups": { "listChanged": true }
+      "io.modelcontextprotocol/groups": {}
     }
   }
 }
@@ -229,21 +227,12 @@ export interface Group {
 }
 ```
 
-A group needs no type tag: what kind of bundle it is follows from what its
-`groups/get` response carries — instructions with no tools is a knowledge
-bundle, tools with no instructions is a toolset, and instructions paired with
-the tools they orchestrate is an instructions-led workflow. Some hosts will
-want to single out one kind of group for special treatment — say, a dedicated
-gallery of instructions-led workflows. A host can recognize that kind in one
-of two ways: from the group's shape (here, a group that carries both
-instructions and tools), or from an optional `_meta` tag the server attaches.
-Either way, the extension defines no group types of its own and privileges no
-profile.
-
 The constraints on `name` are the same identifier rules the [Agent Skills
-naming rules](https://agentskills.io/specification#name-field) use, so a
-workflow authored as an Agent Skill carries its identifier over to a group
-unchanged.
+naming rules](https://agentskills.io/specification#name-field) apply to a skill's
+`name`, so a workflow authored as an Agent Skill can reuse that name as its group
+`name`. The two share the skill's *name*, not a full address: the Skills convention
+locates a skill by a path (`skill://…/<name>`) whose final segment is that name,
+while a group `name` is flat and independent of any navigation hierarchy.
 
 ### `groups/list`
 
@@ -267,10 +256,19 @@ export interface ListGroupsRequest extends PaginatedRequest {
  *
  * @category `groups/list`
  */
-export interface ListGroupsResult extends PaginatedResult {
+export interface ListGroupsResult extends PaginatedResult, CacheableResult {
   groups: Group[];
 }
 ```
+
+`groups/list` keeps discovery open: a server SHOULD answer it without requiring a
+credential, the way `tools/list` does, so a client can learn what the server offers
+and what it may need to authenticate for. The listing still reflects the caller's
+[client view](#placement-and-naming) — an uncredentialed caller sees the groups
+visible to that view — and leaving a group out of the list is discovery gating, not
+access control: a group's contents (`groups/get`) and the invocation of its tools
+remain subject to the server's normal authorization (see
+[Discovery gating is not access control](#discovery-gating-is-not-access-control)).
 
 ### `groups/get`
 
@@ -278,11 +276,16 @@ export interface ListGroupsResult extends PaginatedResult {
 use. It returns everything the client needs to surface the group: its optional
 instructions and any scoped primitives it bundles.
 
-`groups/get` is a **stateless fetch**. It retrieves the group's payload and MUST
-NOT mutate any server-side session state; calling it twice for the same group
-returns the same result and has no side effects. Which groups are "active" is
-therefore client-side state, not server-side — see
-[Statelessness and activation](#statelessness-and-activation).
+`groups/get` is **side-effect-free**: fetching a group SHOULD NOT mutate
+server-side session state, and in particular records no server-side notion of
+which groups are "active" — activation is client-side state (see
+[Statelessness and activation](#statelessness-and-activation)). It is **not**
+a promise that the response is invariant: because a group's `contents` are
+computed for the caller's current view, the payload MAY differ between callers
+and MAY change over time as the server's offering or the caller's entitlements
+change. A client bounds that staleness with the response's caching attributes
+rather than any invalidation signal (see
+[Caching and change detection](#caching-and-change-detection)).
 
 If no group with the requested `name` exists, the server MUST respond with error
 code `-32002` (Resource not found) — the code base `resources/read` uses for an
@@ -317,7 +320,7 @@ export interface GetGroupRequest extends JSONRPCRequest {
  *
  * @category `groups/get`
  */
-export interface GetGroupResult extends Result {
+export interface GetGroupResult extends CacheableResult {
   /**
    * Optional instructions for the group. A markdown string containing the
    * workflow the agent should follow: what to do, how to use the scoped
@@ -380,8 +383,21 @@ how calls are routed.
 **Sharing.** A scoped tool, prompt, or resource MAY appear in more than one group.
 When it does, it is the same primitive, and its definition MUST be identical in
 every group that includes it. Guidance that applies to only one workflow belongs
-in that group's instructions, not in the primitive's description. Group
-instructions MAY refer to top-level primitives by name.
+in that group's instructions, not in the primitive's description.
+
+**Instruction references.** Group instructions may name a primitive in one of two
+ways, and the distinction resolves where a dependency is placed. A **top-level**
+primitive (listed in `tools/list`, `prompts/list`, or `resources/list` for this
+view) MAY be named to orchestrate it; being discoverable already, it is not repeated
+in the group's `contents`. A **scoped** primitive a workflow depends on MUST instead
+appear in the group's own `contents`, since that is the only way the caller receives
+its definition. Because a server MAY scope `contents` per caller, the `instructions`
+it returns MUST stay consistent with that same response's `contents`: they MUST NOT
+reference a scoped tool, prompt, or resource absent from the contents delivered to
+that caller. A server that withholds a scoped primitive from a caller (for example,
+by entitlement) MUST likewise adjust or omit the instructions that depend on it, so
+a caller never receives a workflow that names capability it cannot see — the
+"batteries not included" failure this extension exists to prevent.
 
 **Identity.** Clients MUST treat a server together with a primitive's name (a
 resource's URI) as its identity. A primitive that arrives through several fetched
@@ -461,28 +477,45 @@ This keeps the model's reachable surface small (three client-side tools plus
 whatever else the host exposes) while giving the model a clean way to pull in
 group content on demand. Scoped tools remain invokable through ordinary
 `tools/call` when the client registers them for the session. Other clients may
-inject fetched instructions directly into the model's context, surface groups in
-a UI picker (a host wanting a dedicated gallery of instructions-led workflows
-can key off group shape or an `_meta` tag), or combine approaches; the spec
-accommodates all of these.
+inject fetched instructions directly into the model's context.
 
-### `notifications/groups/list_changed`
+### Caching and change detection
 
-Sent only when the server has declared `listChanged: true` in its extension
-settings object.
+Both `groups/list` and `groups/get` responses extend `CacheableResult`, so each
+carries the base protocol's caching attributes: a `ttlMs` freshness hint and a
+`cacheScope` marker. Change detection is therefore **pull-based**: a
+client treats a fetched listing or group as fresh for `ttlMs` and re-fetches once
+it expires. The server tunes staleness per response — a short `ttlMs` for a
+volatile group, a long one for a stable toolset, `0` to mean "always re-fetch."
 
-```typescript
-/**
- * An optional notification from the server to the client, informing it
- * that the list of groups it offers has changed.
- *
- * @category `notifications/groups/list_changed`
- */
-export interface GroupListChangedNotification extends JSONRPCNotification {
-  method: "notifications/groups/list_changed";
-  params?: NotificationParams;
-}
-```
+- `cacheScope` will generally be `"private"` for `groups/get`, since a group's
+  `contents` are computed for the caller's view and MUST NOT be shared across
+  authorization contexts. A `groups/list` of purely public metadata MAY be
+  `"public"`.
+- This mirrors the Skills extension, whose `skills/list` carries the same
+  attributes and which ships with no change notification of its own; a client
+  learns of a change by re-fetching when its cache goes stale.
+
+This matches the model in
+[Statelessness and activation](#statelessness-and-activation): `groups/get` is
+side-effect-free and its result MAY change between calls, so a TTL hint fits
+where an immutability guarantee would not.
+
+This version defines no `notifications/groups/*` and no group subscription
+mechanism. Pull-based caching via `ttlMs` is sufficient for the configuration-like
+data a group carries (instructions, scoped schemas, nested membership), which
+changes on human timescales rather than in real time. Where instant notification is
+eventually warranted, it should come from the cross-cutting Triggers & Events work
+in progress ([SEP-3415], the Events extension `io.modelcontextprotocol/events`), a
+general subscription primitive intended to serve tasks, skills, and groups
+uniformly, rather than from a groups-specific channel or an addition to the core
+`subscriptions/listen` filter. Staying with caching keeps the extension to
+two methods (`groups/list`, `groups/get`), preserves its stateless posture, and
+avoids committing to a mechanism the wider effort may supersede. A future version
+MAY adopt that primitive additively.
+
+[sep-3415]:
+    https://github.com/modelcontextprotocol/modelcontextprotocol/pull/3415
 
 ### Nested groups
 
@@ -490,33 +523,42 @@ A group MAY list other groups in `contents.groups`, so a server can disclose its
 groups progressively and keep `groups/list` small — see
 [Why nesting exists](#why-nesting-exists). Nesting expresses **navigation only**:
 a child group is a narrower area the model can drill into, not a dependency of its
-parent. If a group's instructions rely on a tool, that tool MUST be in the group's
-own `contents.tools`; because a scoped tool may be shared by several groups (see
-[Placement and naming](#placement-and-naming)), composition happens
-through shared tools and navigation through nesting.
+parent. If a group's instructions depend on a scoped tool, that tool MUST be in the
+group's own `contents.tools` (a top-level tool the instructions merely orchestrate
+need not be — see [Placement and naming](#placement-and-naming)); because a scoped
+tool may be shared by several groups, composition happens through shared tools and
+navigation through nesting.
 
 Within a single client view, a group is either **top-level**, listed in
 `groups/list`, or **nested**, listed in the `contents.groups` of one or more
 parents — never both. (This is not a routing rule — `groups/get` resolves any
 group by its unique name — but, as with tools, keeping a group in one place
 avoids registering it twice, keeps `groups/list` small, and avoids sending a
-mixed core-vs-situational signal.) A nested group MAY sit under several parents,
-and its `Group` object MUST be identical wherever it appears; a client MUST
-register such a group only once.
+mixed core-vs-situational signal.) A nested group MAY sit under several parents, so
+groups and their `contents.groups` references form a **graph**, not a tree: a group
+can be reached by more than one path. Its `Group` object MUST be identical wherever
+it appears, and a client MUST register such a group only once.
 `groups/get` MUST accept the name of any group reachable from `groups/list`, not
 only top-level ones. Fetching a parent does **not** expand its children — each
 child requires its own `groups/get`.
 
-Group nesting MUST NOT form cycles: a cycle carries no meaning and a server can
-check for one trivially. Clients that traverse nested groups MUST still stop on a
-cycle, as a safety net against untrusted servers.
+The extension does not endorse cyclic nesting: servers SHOULD NOT create cycles,
+as a cycle carries no navigational meaning. Cycles MAY nonetheless occur — from a
+buggy or untrusted server — and a client MUST NOT recurse indefinitely when it
+encounters one. A
+client does not need dedicated cycle-detection logic to satisfy this: it already
+tracks which groups it has fetched and registered (each group is registered once
+by name — see [Placement and naming](#placement-and-naming)), so traversal
+terminates naturally when it reaches a group already in play. The guarantee is
+only that traversal halts, not that servers are cycle-free; mandating detection
+would duplicate the activation bookkeeping a host keeps regardless.
 
 A parent's `contents.groups` MUST include only child groups visible to the caller.
-`notifications/groups/list_changed` signals a change to the top-level `groups/list`.
 
-Servers SHOULD keep hierarchies shallow. Fetching one group is one round-trip, so a
-host that eagerly loads a whole tree pays a round-trip per group; a client MAY issue
-a level's fetches in parallel so depth, not breadth, bounds the critical path.
+Servers SHOULD keep hierarchies shallow. Fetching one group is one round-trip,
+so a host that eagerly loads the whole graph pays a round-trip per group; a
+client MAY issue a level's fetches in parallel so depth, not breadth, bounds the
+critical path.
 
 ### Graceful Degradation
 
@@ -679,15 +721,6 @@ extension.
   versioning; a breaking change, if unavoidable, would ship under a new
   identifier (e.g. `io.modelcontextprotocol/groups-v2`).
 
-## Reference Implementation
-
-An experimental implementation exists in this repository's TypeScript SDK
-([`sdk/typescript`](../sdk/typescript)) and a runnable client/server example
-([`examples`](../examples)), covering `groups/list`, `groups/get`, and the three
-group shapes (toolset, knowledge bundle, instructions-led workflow). A reference
-implementation in an official SDK is still required before this Extensions Track
-SEP can be advanced, and will track the shape defined here.
-
 ## Security Implications
 
 - **Groups are untrusted model input, not directives.** Clients MUST surface
@@ -735,19 +768,65 @@ disclosure — the server decides what a group contains and hands out its
 definitions on demand — rather than a client-side filter over an already-loaded
 catalog.
 
-### 2. "Doesn't the Skills extension already solve this?"
+### 2. "Doesn't the Skills extension already solve this? How do the two relate?"
 
-The Skills extension solves the *instruction* half — disclosing a workflow's
-prose, references, and assets on demand as `skill://` resources. It does not
-disclose *tools*: a resource can name a tool but cannot carry its schema or make
-it invokable, so a skill's executable dependencies are neither delivered nor
-guaranteed present for the caller. Groups supplies exactly that missing half —
-typed, invokable tool definitions, scoped per session and fetched alongside the
-instructions that drive them. The two compose; Groups is complementary to the
-Skills extension, not a replacement for it (see Rationale §*Relationship to the
-Skills extension*).
+They work at different layers of the same workflow. The Skills extension
+([SEP-2640]) is a transport binding for the
+[Agent Skills specification](https://agentskills.io/specification): it serves a
+skill's `SKILL.md` and supporting files as MCP resources and delegates the format
+itself (directory layout, frontmatter, the progressive disclosure of content) to
+that spec. The Agent Skills format is built for content, so it has no way to express
+an MCP primitive. A `SKILL.md` can name a tool, but the format carries no typed
+tool, prompt, or resource definition. A group is the MCP-native counterpart, built
+to progressively disclose *MCP primitives*: the typed definitions of tools, prompts,
+resources, and nested groups, on demand. The two line up rather than overlap:
 
-### 3. "Why not just serve all this through resources?"
+- A **skill** covers the content: a workflow's prose, references, and assets,
+  authored in the Agent Skills format and served as `skill://` resources.
+- A **group** covers the primitives: the actual typed, invokable definitions,
+  scoped per session. It can carry instructions alongside them.
+
+A group is not a tools-only mechanism. Tools are the sharpest gap a skill leaves,
+since a skill can describe a tool but never hand one over, but the same holds for
+prompts, resources, and nested groups: a group discloses whatever primitives a
+workflow depends on, together and scoped to the caller.
+
+Because a group can also carry instructions, a single `groups/get` can return a
+skill's instructions along with the primitives they drive, in one of two ways:
+
+1. **By reference.** The group puts the skill's `skill://…/SKILL.md` and its
+   supporting files in `contents.resources`, next to the rest of its scoped
+   primitives. The host loads the skill through the Skills extension the same way
+   it would any other `skill://` reference (SEP-2640 already treats "another skill,
+   or the user" as valid referrers, and a group is just one more), so the authored
+   skill stays the single source of truth.
+2. **Inline.** When one server owns both, the group can put the workflow prose
+   straight into its `instructions` field, which is what the skill's `SKILL.md`
+   would have carried, with its primitives in `contents` and no separate `skill://`
+   resource.
+
+Either way, a skill-shaped group gives the model a workflow and everything it needs
+to run it in a single round-trip, scoped to the caller. This doesn't make the two
+compete: a group is useful with no skills in sight (a plain toolset, or a knowledge
+bundle), and a skill is useful with no group. But when you have both, a group is
+the natural place to disclose the workflow's primitives (see Rationale
+§*Relationship to the Skills extension*).
+
+### 3. "Should a skill be its own primitive?"
+
+No. This extension adds no `Skill` object and no group type tag. A skill-shaped
+group is just a group whose `groups/get` response happens to carry instructions
+(inline or by reference) alongside its scoped primitives; what makes it "a skill"
+is its contents, not a type. Adding a dedicated skill primitive here would
+single out one shape over the toolset and knowledge-bundle shapes the same
+mechanism already covers, re-create the identity and discovery surface the
+Skills extension already owns, and tie the two extensions together where a plain
+`skill://` reference does the job. A host that wants to treat skill-shaped
+groups specially can still spot them from their shape or an optional `_meta`
+tag. Keeping `Group` uniform is what lets the one mechanism cover toolsets,
+knowledge bundles, and skill-led workflows alike.
+
+### 4. "Why not just serve all this through resources?"
 
 - **Resources can't carry tools.** A group's payload is largely *executable*
   primitives — scoped tools and prompts — not files. Resources are read-only
@@ -764,7 +843,7 @@ Skills extension*).
   model here makes deferral the default: `groups/list` returns lightweight
   metadata, and `groups/get` fetches scoped definitions on demand.
 
-### 4. "Clients should implement Tool Search to solve tool bloat."
+### 5. "Clients should implement Tool Search to solve tool bloat."
 
 See Rationale §*Progressive disclosure vs. tool search*. Tool search and groups
 are complementary; requiring search as the only path to progressive discovery is
