@@ -508,14 +508,18 @@ changes on human timescales rather than in real time. Where instant notification
 eventually warranted, it should come from the cross-cutting Triggers & Events work
 in progress ([SEP-3415], the Events extension `io.modelcontextprotocol/events`), a
 general subscription primitive intended to serve tasks, skills, and groups
-uniformly, rather than from a groups-specific channel or an addition to the core
-`subscriptions/listen` filter. Staying with caching keeps the extension to
-two methods (`groups/list`, `groups/get`), preserves its stateless posture, and
-avoids committing to a mechanism the wider effort may supersede. A future version
-MAY adopt that primitive additively.
+uniformly. It should not come from a groups-specific channel or an addition to the
+core `subscriptions/listen` filter: adding a field there would edit a core contract
+on behalf of an optional extension, which [SEP-3371] (consistent SDK extension
+points) counsels against. Staying with caching keeps the extension to two methods
+(`groups/list`, `groups/get`), preserves its stateless posture, and avoids
+committing to a mechanism the wider effort may supersede. A future version MAY adopt
+that primitive additively.
 
 [sep-3415]:
     https://github.com/modelcontextprotocol/modelcontextprotocol/pull/3415
+[sep-3371]:
+    https://github.com/modelcontextprotocol/modelcontextprotocol/pull/3371
 
 ### Nested groups
 
