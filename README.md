@@ -40,6 +40,8 @@ See the [Problem Statement](docs/problem-statement.md) for full details.
 | [Experimental Findings](docs/experimental-findings.md) | Results from implementations and testing |
 | [Related Work](docs/related-work.md) | SEPs, implementations, and external resources |
 | [Progressive Disclosure via Groups (SEP)](seps/0000-progressive-disclosure-groups.md) | Draft extension proposal (`io.modelcontextprotocol/groups`) |
+| [SDK](sdk/typescript) | TypeScript SDK for the groups extension |
+| [Examples](examples) | Runnable client/server prototype of the extension |
 | [Contributing](CONTRIBUTING.md) | How to participate |
 
 
