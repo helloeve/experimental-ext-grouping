@@ -3,7 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   setupGroups,
   ServerGroup,
-  GroupContents,
+  GroupPrimitives,
   GROUPS_EXTENSION,
 } from "@modelcontextprotocol/ext-grouping";
 import {
@@ -53,7 +53,7 @@ const weatherGroup: ServerGroup = {
     "Use `get_weather` for current conditions, `get_forecast` for a multi-day " +
     "outlook, and `get_severe_alerts` to check active warnings before advising " +
     "on travel or outdoor plans.",
-  contents: (): GroupContents => ({
+  primitives: (): GroupPrimitives => ({
     tools: [
       {
         name: "get_weather",
@@ -110,7 +110,7 @@ const calendarGroup: ServerGroup = {
     description:
       "Read and manage calendar events: list a day, find open slots, schedule, and cancel.",
   },
-  contents: (): GroupContents => ({
+  primitives: (): GroupPrimitives => ({
     tools: [
       {
         name: "list_events",
@@ -187,7 +187,7 @@ const knowledgeBaseGroup: ServerGroup = {
   },
   instructions: () =>
     "# Knowledge Base\nRead the provided internal resources to answer questions about the project.",
-  contents: (): GroupContents => ({
+  primitives: (): GroupPrimitives => ({
     resources: [
       {
         uri: "internal://docs/project-guidelines.txt",
@@ -217,7 +217,7 @@ const crmGroup: ServerGroup = {
     "Resolve the customer with `find_customer` first, then use its id with " +
     "`get_account_summary`, `create_ticket`, or `log_interaction`. Always " +
     "confirm the customer identity before creating tickets.",
-  contents: (): GroupContents => ({
+  primitives: (): GroupPrimitives => ({
     tools: [
       {
         name: "find_customer",
@@ -287,7 +287,7 @@ const travelGroup: ServerGroup = {
     "# Travel Booking\n" +
     "Search options with `search_flights` and `search_hotels`, present the best " +
     "few to the user, and only call `book_itinerary` after they confirm.",
-  contents: (): GroupContents => ({
+  primitives: (): GroupPrimitives => ({
     tools: [
       {
         name: "search_flights",

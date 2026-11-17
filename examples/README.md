@@ -71,7 +71,7 @@ cd examples/groups-client/typescript && npm start        # or: node dist/index.j
 
 You should see `groups/list` return the three groups, followed by a
 `groups/get` round-trip for each — note that `calendar`'s response returns
-`contents` with no `instructions` field.
+its `tools` with no `instructions` field.
 
 ## Running groups-agent
 

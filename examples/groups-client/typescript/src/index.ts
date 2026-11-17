@@ -32,7 +32,7 @@ async function main() {
   const weatherResponse = await groups.getGroup("weather-forecaster");
   console.log(JSON.stringify(weatherResponse, null, 2));
 
-  const weatherTool = (weatherResponse.contents?.tools || []).find(t => t.name === "get_weather");
+  const weatherTool = (weatherResponse.tools || []).find(t => t.name === "get_weather");
   if (weatherTool) {
     console.log(`\nExecuting discovered tool: ${weatherTool.name}`);
     const toolResult = await client.callTool({
@@ -48,7 +48,7 @@ async function main() {
   const kbResponse = await groups.getGroup("knowledge-base");
   console.log(JSON.stringify(kbResponse, null, 2));
 
-  const docResource = (kbResponse.contents?.resources || []).find(r => r.uri.includes("project-guidelines"));
+  const docResource = (kbResponse.resources || []).find(r => r.uri.includes("project-guidelines"));
   if (docResource) {
     console.log(`\nGetting discovered resource: ${docResource.uri}`);
     const runResult = await client.readResource({ uri: docResource.uri });
@@ -61,7 +61,7 @@ async function main() {
   const calResponse = await groups.getGroup("calendar");
   console.log(JSON.stringify(calResponse, null, 2));
 
-  const eventsTool = (calResponse.contents?.tools || []).find(t => t.name === "list_events");
+  const eventsTool = (calResponse.tools || []).find(t => t.name === "list_events");
   if (eventsTool) {
     console.log(`\nExecuting discovered tool: ${eventsTool.name}`);
     const toolResult = await client.callTool({

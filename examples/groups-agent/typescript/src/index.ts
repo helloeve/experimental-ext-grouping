@@ -307,7 +307,7 @@ async function main() {
         toolResults.push(toolResult(id, `Available groups:\n${summary}`));
       } else if (name === "get_group") {
         const g = await groups.getGroup(input.name);
-        const scoped = g.contents?.tools ?? [];
+        const scoped = g.tools ?? [];
         for (const t of scoped) {
           scopedTools.add(t.name);
           const def = {

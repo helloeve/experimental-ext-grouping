@@ -190,7 +190,7 @@ export function register(on: On) {
             } catch (err) {
                 return { deny: `open_group '${g}' failed: ${String(err)}` }
             }
-            const tools: any[] = r?.contents?.tools ?? []
+            const tools: any[] = r?.tools ?? []
             // Disclose the group's scoped tools mid-session. Populate the lookup
             // maps BEFORE $.tool.register: the engine may fire tool.describe during
             // registration, and if the maps aren't set yet it would land the tool

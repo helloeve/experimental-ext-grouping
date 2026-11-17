@@ -1,5 +1,5 @@
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
-import { ListGroupsRequestSchema, GetGroupRequestSchema, Group, GroupContents } from './types.js';
+import { ListGroupsRequestSchema, GetGroupRequestSchema, Group, GroupPrimitives } from './types.js';
 
 /**
  * Minimal structural view of the MCP `Server` surface `setupGroups` relies on.
@@ -18,7 +18,11 @@ export interface ServerGroup {
      * that only needs to reveal its scoped tools when fetched.
      */
     instructions?: (params: { name: string }) => string | Promise<string>;
-    contents?: (params: { name: string }) => GroupContents | Promise<GroupContents>;
+    /**
+     * Optional. The group's scoped primitives. They are returned directly on
+     * the `groups/get` result, next to `instructions`.
+     */
+    primitives?: (params: { name: string }) => GroupPrimitives | Promise<GroupPrimitives>;
 }
 
 /**
@@ -43,16 +47,21 @@ export function setupGroups(server: GroupsCapableServer, groups: ServerGroup[]) 
         }
 
         const instructions = g.instructions ? await g.instructions({ name }) : undefined;
-        const contents = g.contents ? await g.contents({ name }) : undefined;
+        const primitives = g.primitives ? await g.primitives({ name }) : {};
 
-        // A response carries no meaning without at least one of these.
-        if (instructions === undefined && contents === undefined) {
-            throw new Error(`Group '${name}' returned neither instructions nor contents`);
+        // Flat result: scoped primitives sit next to `instructions`, with no
+        // wrapper. Only include the arrays the group actually provides.
+        const result: Record<string, unknown> = {};
+        if (instructions !== undefined) result.instructions = instructions;
+        for (const key of ['tools', 'prompts', 'resources', 'groups'] as const) {
+            if (primitives[key] !== undefined) result[key] = primitives[key];
         }
 
-        return {
-            ...(instructions !== undefined ? { instructions } : {}),
-            ...(contents !== undefined ? { contents } : {})
-        };
+        // A response carries no meaning without at least one field.
+        if (Object.keys(result).length === 0) {
+            throw new Error(`Group '${name}' returned neither instructions nor primitives`);
+        }
+
+        return result;
     });
 }

@@ -63,27 +63,31 @@ export interface GetGroupRequest extends Request {
 
 export const GetGroupResultSchema = z
     .object({
-        // Both fields are optional, but a response MUST carry at least one of them.
-        // A primitives-only group (e.g. a toolset) omits `instructions`; a knowledge
-        // bundle may carry `instructions` alone.
-        instructions: z.string().optional()
+        // Every field is optional, but a response MUST carry at least one of
+        // them. A primitives-only group (e.g. a toolset) omits `instructions`; a
+        // knowledge bundle may carry `instructions` alone. Scoped primitives sit
+        // directly on the result, next to `instructions`, with no wrapper object.
+        instructions: z.string().optional(),
+        tools: z.array(z.object({ name: z.string() }).passthrough()).optional(),
+        prompts: z.array(z.object({ name: z.string() }).passthrough()).optional(),
+        resources: z.array(z.object({ uri: z.string() }).passthrough()).optional(),
+        groups: z.array(GroupSchema).optional()
     })
     .passthrough();
 
 /**
- * Scoped primitives bundled with a group and returned in the
- * `groups/get` response. These are omitted from top-level tools/list,
- * prompts/list, and resources/list for discovery purposes, but remain
- * invokable server-side.
+ * Scoped primitives a group discloses in its `groups/get` response. They sit
+ * directly on the result (no `contents` wrapper). They are omitted from
+ * top-level tools/list, prompts/list, and resources/list for discovery
+ * purposes, but remain invokable server-side.
  */
-export interface GroupContents {
+export interface GroupPrimitives {
     tools?: Tool[];
     prompts?: Prompt[];
     resources?: Resource[];
     groups?: Group[];
 }
 
-export interface GetGroupResult extends Result {
+export interface GetGroupResult extends Result, GroupPrimitives {
     instructions?: string;
-    contents?: GroupContents;
 }
